@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  scraper:
+    build: .
+    container_name: cannabis-scraper
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  scraper-arm:
+    image: cannabis-scraper-arm
+    build:
+      context: .
+      dockerfile: Dockerfile.arm
+    container_name: cannabis-scraper-arm
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
