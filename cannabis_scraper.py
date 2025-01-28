@@ -13,6 +13,12 @@ from playwright.sync_api import sync_playwright
 import backoff
 import os
 from datetime import datetime, timedelta
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # Checkpoint configuration
 CHECKPOINT_INTERVAL = 10  # Save progress every 10 stores
@@ -200,83 +206,53 @@ def scrape_all_stores():
         stores = []
         start_index = 0
     
-    # Get list of store URLs using Playwright to handle JavaScript rendering
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(BASE_URL, timeout=30000)
+    # Get list of store URLs using Selenium to handle JavaScript rendering and bypass Cloudflare
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
+    try:
+        driver = webdriver.Chrome(options=options)
+        driver.get(BASE_URL)
         
-        # Wait for store listings to load with longer timeout
+        # Handle Cloudflare challenge if present
         try:
-            # Set browser-like headers
-            page.set_extra_http_headers({
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Referer': 'https://www.google.com/',
-                'DNT': '1',
-                'Upgrade-Insecure-Requests': '1'
-            })
-            
-            # Add random delays to mimic human behavior
-            time.sleep(random.uniform(1, 3))
-            
-            # Navigate with longer timeout and wait for network idle
-            page.goto(BASE_URL, timeout=120000, wait_until='networkidle')
-            
-            # Handle Cloudflare challenge if present
-            try:
-                page.wait_for_selector('#challenge-running', state='attached', timeout=10000)
-                logging.info("Cloudflare challenge detected, waiting for completion...")
-                page.wait_for_selector('#challenge-running', state='detached', timeout=60000)
-                logging.info("Cloudflare challenge completed")
-            except Exception as e:
-                logging.info("No Cloudflare challenge detected")
-            
-            # Save initial state
-            try:
-                page.screenshot(path='page_screenshot_initial.png')
-                logging.info("Saved initial page screenshot")
-            except Exception as e:
-                logging.warning(f"Could not save initial screenshot: {str(e)}")
-            
-            # Save page content regardless of selector success
-            content = page.content()
-            with open('page_content.html', 'w', encoding='utf-8') as f:
-                f.write(content)
-            logging.info("Saved page content to page_content.html")
-            
-            # Try multiple selector approaches with increased timeout
-            try:
-                # First attempt with original selector
-                page.wait_for_selector('div.store-listing', state='attached', timeout=30000)
-            except Exception as e:
-                logging.warning(f"Original selector failed: {str(e)}")
-                # Fallback to more generic container
-                try:
-                    page.wait_for_selector('.listings-container', state='attached', timeout=30000)
-                except Exception as e:
-                    logging.warning(f"Fallback selector failed: {str(e)}")
-                    # Final fallback to body content
-                    page.wait_for_selector('body', state='attached', timeout=30000)
-            
-            # Save final state
-            try:
-                page.screenshot(path='page_screenshot_final.png')
-                logging.info("Saved final page screenshot")
-            except Exception as e:
-                logging.warning(f"Could not save final screenshot: {str(e)}")
-            
-            # Extract store links
-            store_links = page.eval_on_selector_all(
-                'div.store-listing > a',
-                'elements => elements.map(el => el.href)'
+            challenge_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '#challenge-running'))
             )
+            logging.info("Cloudflare challenge detected, waiting for completion...")
+            # Solve the challenge automatically if possible
+            WebDriverWait(driver, 60).until(
+                EC.staleness_of(challenge_element)
+            )
+            logging.info("Cloudflare challenge completed")
+        except TimeoutException:
+            logging.info("No Cloudflare challenge detected")
+        
+        # Save initial state
+        try:
+            driver.save_screenshot('page_screenshot_initial.png')
+            logging.info("Saved initial page screenshot")
         except Exception as e:
-            logging.error(f"Failed to load store listings: {str(e)}")
+            logging.warning(f"Could not save initial screenshot: {str(e)}")
+        
+        # Extract store links
+        try:
+            store_links = driver.find_elements(By.CSS_SELECTOR, 'div.store-listing > a')
+            store_links = [link.get_attribute('href') for link in store_links]
+            logging.info(f"Found {len(store_links)} stores to scrape")
+        except Exception as e:
+            logging.error(f"Failed to extract store links: {str(e)}")
             raise
-        browser.close()
+        
+        driver.quit()
+    except Exception as e:
+        logging.error(f"Failed to initialize Selenium: {str(e)}")
+        raise
     
     # Convert relative URLs to absolute
     store_links = [urljoin(BASE_URL, link) for link in store_links]

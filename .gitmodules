@@ -1,0 +1,3 @@
+[submodule "cannabis-scraper"]
+	path = cannabis-scraper
+	url = https://github.com/Muncslice/cannabis-scraper.git
