@@ -1,6 +1,10 @@
-requests==2.31.0
-beautifulsoup4==4.12.2
-cloudscraper==1.2.71
-playwright==1.40.0
-backoff==2.2.1
-lxml==5.1.0
+undetected-chromedriver>=3.5.5
+selenium>=4.28.1
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+fake-useragent>=1.2.1
+backoff>=2.2.1
+cloudscraper>=1.2.71
+websockets>=14.2
+trio>=0.28.0
+trio-websocket>=0.11.1
